@@ -1,0 +1,49 @@
+name: Build and publish Lensfun data
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-lensfun-data.yml
+      - Tools/lensfun/**
+      - SHA256SUMS
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the public package
+        uses: actions/checkout@v4
+
+      - name: Check out the pinned Lensfun source
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/lensfun/lensfun.git "$RUNNER_TEMP/lensfun"
+          git -C "$RUNNER_TEMP/lensfun" checkout --detach 5bfb8d8cb151a3a4068219cfc798f63d0641ff19
+
+      - name: Generate the deterministic package
+        run: |
+          python3 Tools/lensfun/convert_lensfun_distortion.py \
+            --lensfun-root "$RUNNER_TEMP/lensfun" \
+            --output lensfun-distortion-v1.json
+
+      - name: Verify schema, model semantics, and checksums
+        run: |
+          python3 Tools/lensfun/verify_lensfun_package.py --package-dir .
+          shasum -a 256 -c SHA256SUMS
+
+      - name: Publish the generated package when it changed
+        run: |
+          git add lensfun-distortion-v1.json
+          if git diff --cached --quiet; then
+            echo "Generated package already matches the repository."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Generate Lensfun distortion data v1"
+          git push
